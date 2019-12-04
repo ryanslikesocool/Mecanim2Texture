@@ -17,6 +17,7 @@ An attempt at converting a Unity animation to a 2d texture for use with mesh ani
   - Pixels to fill: how many pixels in the final texture will be filled.  This is dependent on the Skinned Mesh Renderer's vertex count and the frames to convert
   - Resulting texture size: the square root of the pixels to fill rounded up to the next power of 2.  You could always make it a custom size but I figured that powers of two are easiest to work with
 - Click "Create Animation Texture".  Depending on how many vertices your mesh has, it could take up to a few minutes.  With about 700 vertices it takes my computer about 1-2 seconds to generate the file.
+- DO NOT CLOSE THE EDITOR WINDOW until the texture creation is complete.  Unity has to run the animation through a coroutine to sample each frame of the animation to get all of the vertices.  If you close the window, you stop the coroutine.
 - Find the file in your base "Assets" directory.
 
 ### UV Map Tab
