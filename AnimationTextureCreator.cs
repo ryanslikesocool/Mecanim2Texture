@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEditor;
 using System.IO;
-using Unity.EditorCoroutines;
 
 public class AnimationTextureCreator : EditorWindow
 {
@@ -53,20 +52,15 @@ public class AnimationTextureCreator : EditorWindow
     void AnimationTextureEditor()
     {
         riggedPrefab = (GameObject)EditorGUILayout.ObjectField("Rigged Prefab", riggedPrefab, typeof(GameObject), true);
-        rendererType = (RendererType)EditorGUILayout.EnumPopup("Renderer Type", rendererType);
 
         if (riggedPrefab == null)
         {
             return;
         }
         string errorMessage = null;
-        if (rendererType == RendererType.Skinned && riggedPrefab.GetComponentInChildren<SkinnedMeshRenderer>() == null)
+        if (riggedPrefab.GetComponentInChildren<SkinnedMeshRenderer>() == null)
         {
             errorMessage = "ERROR: Could not find a Skinned Mesh Renderer\nin the object's hierarchy.";
-        }
-        if (rendererType == RendererType.Normal && riggedPrefab.GetComponentInChildren<MeshFilter>() == null)
-        {
-            errorMessage = "ERROR: Could not find a Mesh Filter\nin the object's hierarchy.";
         }
         if (riggedPrefab.GetComponentInChildren<Animator>() == null)
         {
@@ -178,10 +172,7 @@ public class AnimationTextureCreator : EditorWindow
 
             animator.Update(animationDeltaTime);
 
-            for (int j = 0; j < 10; j++)
-            {
-                yield return null;
-            }
+            yield return null;
         }
 
         DestroyImmediate(prefab);
