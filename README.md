@@ -21,6 +21,7 @@ An attempt at converting a Unity animation to a 2d texture for use with mesh ani
 - Find the file in your base "Assets" directory.
 
 ### UV Map Tab
+- THIS TAB IS NOT NECESSARY.  I had it in here for testing purposes, but I figure that it may be useful to someone so I'm leaving it in.
 - Set the texture created in the previous tab in the texture slot
 - Set a gameobject with a mesh to add/modify the UVs on
 - Select which UV layer you want to set.  If you've already got UVs on that layer, you will see a warning
@@ -33,7 +34,7 @@ An attempt at converting a Unity animation to a 2d texture for use with mesh ani
 ## Notes
 ### Animation Texture
 - The pixels on resulting animation textures are ordered Y-up to X-right
-- To properly use an animation texture, you'll need to use a shader that supports vertex ID.  I currently do not have one ready, but I'll update this repo with it once I create it.
+- To properly use an animation texture, you'll need to use a shader that supports vertex ID.  The shader provided in this repo works, but someone will likely come up with something better
 ### UV Map
 - I recommend exporting the mesh as a new file (such as with Unity's FBX Exporter) once you've updated the map, as the UV will disappear when you close the editor
 
