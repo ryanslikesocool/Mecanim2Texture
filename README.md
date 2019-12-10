@@ -1,5 +1,5 @@
 # Mecanim2Texture
-An attempt at converting a Unity animation to a 2d texture for use with mesh animation
+Convert Mecanim animations to baked animation textures!
 
 ## Usage
 ### Animation Texture Tab
