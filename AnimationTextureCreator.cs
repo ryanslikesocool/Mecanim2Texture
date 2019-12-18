@@ -245,14 +245,8 @@ public class AnimationTextureCreator : EditorWindow
         for (int i = 0; i < resultUV.Length; i++)
         {
             Vector2 gridPosition = new Vector2(x, y) * gridInterval;
-            resultUV[i] = gridPosition + initialOffset;
 
-            y++;
-            if (y == animationTexture.height)
-            {
-                x++;
-                y = 0;
-            }
+            resultUV[i].x = i;
         }
 
         originalMesh.SetUVs((int)uvLayer, resultUV);
