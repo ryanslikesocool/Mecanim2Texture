@@ -227,19 +227,19 @@ public class AnimationTextureCreator : EditorWindow
         if (mesh != null)
         {
             EditorGUILayout.Space(16);
-            if (GUILayout.Button("Set UV For Layer"))
+            if (GUILayout.Button("Create & Save UV for Layer"))
             {
-                ApplyUVToLayer(mesh);
+                ApplyUVToLayer(mesh.vertexCount);
             }
         }
     }
 
-    void ApplyUVToLayer(Mesh originalMesh)
+    void ApplyUVToLayer(int vertexCount)
     {
         float gridInterval = 1f / animationTexture.height;
         Vector2 initialOffset = Vector2.one * gridInterval * 0.5f;
 
-        Vector2[] resultUV = new Vector2[originalMesh.vertexCount];
+        Vector2[] resultUV = new Vector2[vertexCount];
         int x = 0;
         int y = 0;
         for (int i = 0; i < resultUV.Length; i++)
@@ -249,16 +249,17 @@ public class AnimationTextureCreator : EditorWindow
             resultUV[i].x = i;
         }
 
-        originalMesh.SetUVs((int)uvLayer, resultUV);
-        Mesh instantiation = Instantiate(originalMesh);
-        instantiation.name = originalMesh.name;
         if (rendererType == RendererType.Normal)
         {
-            meshContainer.GetComponentInChildren<MeshFilter>().sharedMesh = instantiation;
+            MeshFilter filter = meshContainer.GetComponentInChildren<MeshFilter>();
+            filter.sharedMesh.SetUVs((int)uvLayer, resultUV);
+            AssetDatabase.CreateAsset(filter.sharedMesh, "Assets/" + filter.sharedMesh.name + " Baked.asset");
         }
         else
         {
-            meshContainer.GetComponentInChildren<SkinnedMeshRenderer>().sharedMesh = instantiation;
+            SkinnedMeshRenderer skinned = meshContainer.GetComponentInChildren<SkinnedMeshRenderer>();
+            skinned.sharedMesh.SetUVs((int)uvLayer, resultUV);
+            AssetDatabase.CreateAsset(skinned.sharedMesh, "Assets/" + skinned.sharedMesh.name + " Baked.asset");
         }
     }
 
