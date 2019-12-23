@@ -21,7 +21,6 @@ Convert Mecanim animations to baked animation textures!
 - Find the file in your base "Assets" directory.
 
 ### UV Map Tab
-- THIS TAB IS NOT NECESSARY.  I had it in here for testing purposes, but I figure that it may be useful to someone so I'm leaving it in.
 - Set the texture created in the previous tab in the texture slot
 - Set a gameobject with a mesh to add/modify the UVs on
 - Select which UV layer you want to set.  If you've already got UVs on that layer, you will see a warning
