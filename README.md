@@ -33,7 +33,7 @@ Convert Mecanim animations to baked animation textures!
 ## Notes
 ### Animation Texture
 - The pixels on resulting animation textures are ordered Y-up to X-right
-- To properly use an animation texture, you'll need to use a shader that supports vertex ID.  The shader provided in this repo works, but someone will likely come up with something better
+- To properly use an animation texture, you'll need to use a shader that supports vertex ID.  The shader provided in this repo works.
 ### UV Map
 - I recommend exporting the mesh as a new file (such as with Unity's FBX Exporter) once you've updated the map, as the UV will disappear when you close the editor
 
