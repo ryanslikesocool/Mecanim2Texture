@@ -91,7 +91,7 @@ public class MecanimToTexture : EditorWindow
             checkNextError = !SetError(Errors.MissingRuntimeAnimatorController, textureErrors, animationRigObject.GetComponentInChildren<Animator>().runtimeAnimatorController == null);
         }
 
-        AnimationClip[] animationClips = animationRigObject.GetComponentInChildren<Animator>().runtimeAnimatorController.animationClips;
+        AnimationClip[] animationClips = animationRigObject?.GetComponentInChildren<Animator>()?.runtimeAnimatorController?.animationClips;
         if (checkNextError)
         {
             checkNextError = !SetError(Errors.NoAnimationClips, textureErrors, animationClips.Length == 0);
