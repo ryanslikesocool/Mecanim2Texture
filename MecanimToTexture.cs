@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEditor;
 using System.IO;
+using UnityEngine.Experimental.Rendering;
+using Unity.EditorCoroutines.Editor;
 
 public class MecanimToTexture : EditorWindow
 {
@@ -16,17 +18,19 @@ public class MecanimToTexture : EditorWindow
 
     #region Animation Texture Props
     private GameObject animationRigObject;
-    private int framesPerSecondCapture = 60;
+    private bool bakeAll = true;
+    private int framesPerSecondCapture = 30;
     private int clipToBakeIndex = 0;
-    private float scaler = 0.5f;
+    private float scaler = 1;
     private int minFrame = 0;
-    private int maxFrame = 100;
-    private ColorMode colorMode = ColorMode.LDR;
+    private int maxFrame = 200;
+    private ColorMode colorMode = ColorMode.HDR;
     #endregion
 
     #region UV Map Props
     private Mesh uvMesh;
-    private UVLayer uvLayer;
+    private UVLayer uvLayer = UVLayer.UV1;
+    private float uvMeshScale = 1;
     #endregion
 
     private List<string> textureErrors = new List<string>();
@@ -56,7 +60,7 @@ public class MecanimToTexture : EditorWindow
         }
         EditorGUILayout.EndScrollView();
 
-        switch(currentTab)
+        switch (currentTab)
         {
             case 0:
                 ErrorView(textureErrors);
@@ -102,50 +106,174 @@ public class MecanimToTexture : EditorWindow
         }
 
         colorMode = (ColorMode)EditorGUILayout.EnumPopup("Color Mode", colorMode);
-        clipToBakeIndex = EditorGUILayout.Popup(new GUIContent("Clip to Bake", "Which animation clip will be baked."), clipToBakeIndex, GetAnimationClipNames(animationClips));
-        AnimationClip clipToBake = animationClips[clipToBakeIndex];
-
+        bakeAll = EditorGUILayout.Toggle(new GUIContent("Bake All", "Mass bake clips into a Texture2DArray asset"), bakeAll);
         framesPerSecondCapture = EditorGUILayout.IntSlider(new GUIContent("FPS Capture", "How many frames per second the clip will be captured at."), framesPerSecondCapture, 24, 120);
         scaler = EditorGUILayout.FloatField(new GUIContent("Bake Scale", "Scale the mesh before baking to reduce the chance of baked pixels being out of range."), scaler);
 
-        float totalTime = clipToBake.length;
+        int vertexCount = animationRigObject.GetComponentInChildren<SkinnedMeshRenderer>().sharedMesh.vertexCount;
+        float totalTime = 0;
+        int totalFrames;
+        int squareFrames;
+        int textureSize = 0;
 
-        minFrame = EditorGUILayout.IntSlider(new GUIContent("Min Capture Frame", "The frame to start capturing at."), minFrame, 0, maxFrame);
-        maxFrame = EditorGUILayout.IntSlider(new GUIContent("Max Capture Frame", "The frame to end capturing at."), maxFrame, minFrame, (int)(totalTime * framesPerSecondCapture));
+        AnimationClip clipToBake = null;
+
+        if (bakeAll)
+        {
+            for (int i = 0; i < animationClips.Length; i++)
+            {
+                float clipTime = animationClips[i].length;
+                float clipFrames = (int)(clipTime * framesPerSecondCapture);
+                totalTime += clipTime;
+                squareFrames = Mathf.FloorToInt(Mathf.Sqrt(clipFrames * vertexCount));
+                textureSize = Mathf.Max(Mathf.NextPowerOfTwo(squareFrames), textureSize);
+            }
+
+            totalFrames = (int)(totalTime * framesPerSecondCapture);
+        }
+        else
+        {
+            clipToBakeIndex = EditorGUILayout.Popup(new GUIContent("Clip to Bake", "Which animation clip will be baked."), clipToBakeIndex, GetAnimationClipNames(animationClips));
+            clipToBake = animationClips[clipToBakeIndex];
+
+            totalTime = clipToBake.length;
+
+            minFrame = EditorGUILayout.IntSlider(new GUIContent("Min Capture Frame", "The frame to start capturing at."), minFrame, 0, maxFrame);
+            maxFrame = EditorGUILayout.IntSlider(new GUIContent("Max Capture Frame", "The frame to end capturing at."), maxFrame, minFrame, (int)(totalTime * framesPerSecondCapture));
+
+            totalFrames = maxFrame - minFrame;
+            squareFrames = Mathf.FloorToInt(Mathf.Sqrt(totalFrames * vertexCount));
+            textureSize = Mathf.NextPowerOfTwo(squareFrames);
+        }
 
         EditorGUILayout.Space(EditorGUIUtility.singleLineHeight);
+        EditorGUILayout.LabelField($"Frames to bake: {totalFrames}");
+        EditorGUILayout.LabelField($"Pixels to fill: {vertexCount * totalFrames}");
+        EditorGUILayout.LabelField($"Result texture size: {textureSize}x{textureSize}" + (bakeAll ? $"x{animationClips.Length}" : ""));
+        EditorGUILayout.LabelField($"Estimated bake time: {totalTime / (60 / framesPerSecondCapture)} seconds");
 
-        int vertexCount = animationRigObject.GetComponentInChildren<SkinnedMeshRenderer>().sharedMesh.vertexCount;
-        int totalFrames = maxFrame - minFrame;
-        int squareFrames = Mathf.FloorToInt(Mathf.Sqrt(totalFrames * vertexCount));
-        int textureSize = Mathf.NextPowerOfTwo(squareFrames);
-
-        EditorGUILayout.LabelField("Frames to bake: " + totalFrames);
-        EditorGUILayout.LabelField("Pixels to fill: " + vertexCount * totalFrames);
-        EditorGUILayout.LabelField("Result texture size: " + textureSize + "x" + textureSize);
-        if (GUILayout.Button("Bake Animation"))
+        if (bakeAll)
         {
-            Unity.EditorCoroutines.Editor.EditorCoroutineUtility.StartCoroutine(CreateAnimationTexture(textureSize, vertexCount, totalFrames, framesPerSecondCapture, clipToBake), this);
+            if (GUILayout.Button("Bake Animations"))
+            {
+                EditorCoroutineUtility.StartCoroutine(CreateAnimationTextureArray(textureSize, vertexCount, framesPerSecondCapture, animationClips), this);
+            }
+        }
+        else if (GUILayout.Button("Bake Animation"))
+        {
+            EditorCoroutineUtility.StartCoroutine(CreateAnimationTexture(textureSize, vertexCount, totalFrames, framesPerSecondCapture, clipToBake), this);
         }
     }
 
     private string[] GetAnimationClipNames(AnimationClip[] clips)
     {
         string[] result = new string[clips.Length];
-        for(int i = 0; i < clips.Length; i++)
+        for (int i = 0; i < clips.Length; i++)
         {
             result[i] = clips[i].name;
         }
         return result;
     }
 
-    IEnumerator CreateAnimationTexture(int size, int vertexCount, int frames, int fps, AnimationClip clip)
+    private IEnumerator CreateAnimationTextureArray(int size, int vertexCount, int fps, AnimationClip[] clips)
     {
+        string path = EditorUtility.SaveFilePanelInProject("Save Baked Animation", animationRigObject.name, "asset", "Please save your baked animation");
+        if (path.Length == 0)
+        {
+            yield break;
+        }
+
         GameObject prefab = Instantiate(animationRigObject);
         Animator animator = prefab.GetComponentInChildren<Animator>();
         SkinnedMeshRenderer skinnedMesh = prefab.GetComponentInChildren<SkinnedMeshRenderer>();
 
-        Texture2D result = new Texture2D(size, size, UnityEngine.Experimental.Rendering.DefaultFormat.HDR, UnityEngine.Experimental.Rendering.TextureCreationFlags.None);
+        Texture2DArray result = new Texture2DArray(size, size, clips.Length, TextureFormat.RGB9e5Float, false, true);
+        AssetDatabase.CreateAsset(result, path);
+
+        for (int clip = 0; clip < clips.Length; clip++)
+        {
+            Color[] clipColors = new Color[size * size];
+            for (int i = 0; i < clipColors.Length; i++)
+            {
+                clipColors[i] = Color.clear;
+            }
+
+            float clipTime = clips[clip].length;
+            int frames = (int)(clipTime * framesPerSecondCapture);
+
+            animator.Play(clips[clip].name, 0, 0);
+            yield return null;
+            animator.Update(0);
+
+            float animationDeltaTime = 1f / fps;
+
+            int y = 0;
+            int x = 0;
+            for (int i = 0; i < frames; i++)
+            {
+                Mesh meshFrame = new Mesh();
+                skinnedMesh.BakeMesh(meshFrame);
+                meshFrame.RecalculateBounds();
+
+                //red = x
+                //green = y
+                //blue = z
+                for (int j = 0; j < vertexCount; j++)
+                {
+                    Color pixel = Color.clear;
+                    Vector3 position = meshFrame.vertices[j] * scaler + Vector3.one * 0.5f;
+                    pixel.r = position.x;
+                    pixel.g = position.y;
+                    pixel.b = position.z;
+                    pixel.a = 1;
+
+                    SetError(Errors.PixelOutOfRange,
+                        textureErrors,
+                        position.x > 1 || position.x < 0
+                     || position.y > 1 || position.y < 0
+                     || position.z > 1 || position.z < 0
+                    );
+
+                    clipColors[x + y * size] = pixel;
+
+                    y++;
+                    if (y == size)
+                    {
+                        x++;
+                        y = 0;
+                    }
+                }
+
+                DestroyImmediate(meshFrame);
+
+                animator.Update(animationDeltaTime);
+
+                yield return null;
+            }
+            result.SetPixels(clipColors, clip);
+        }
+
+        result.Apply();
+
+        DestroyImmediate(prefab);
+
+        result.filterMode = FilterMode.Point;
+        AssetDatabase.ImportAsset(path);
+    }
+
+    private IEnumerator CreateAnimationTexture(int size, int vertexCount, int frames, int fps, AnimationClip clip)
+    {
+        string path = EditorUtility.SaveFilePanelInProject("Save Baked Animation Array", animationRigObject.name, colorMode == ColorMode.HDR ? "exr" : "png", "Please save your baked animations");
+        if (path.Length == 0)
+        {
+            yield break;
+        }
+
+        GameObject prefab = Instantiate(animationRigObject);
+        Animator animator = prefab.GetComponentInChildren<Animator>();
+        SkinnedMeshRenderer skinnedMesh = prefab.GetComponentInChildren<SkinnedMeshRenderer>();
+
+        Texture2D result = new Texture2D(size, size, DefaultFormat.HDR, TextureCreationFlags.None);
 
         Color[] clearColors = new Color[size * size];
         for (int i = 0; i < clearColors.Length; i++)
@@ -168,6 +296,7 @@ public class MecanimToTexture : EditorWindow
             {
                 Mesh meshFrame = new Mesh();
                 skinnedMesh.BakeMesh(meshFrame);
+                meshFrame.RecalculateBounds();
 
                 //red = x
                 //green = y
@@ -210,26 +339,21 @@ public class MecanimToTexture : EditorWindow
 
         #region Export
         byte[] encodedTex;
-        string extension;
         if (colorMode == ColorMode.HDR)
         {
             encodedTex = result.EncodeToEXR();
-            extension = ".exr";
         }
         else
         {
             encodedTex = result.EncodeToPNG();
-            extension = ".png";
         }
 
-        string savePath = Path.Combine(Application.dataPath, $"{animationRigObject.name} {clip.name}{extension}");
-        using (FileStream stream = File.Open(savePath, FileMode.OpenOrCreate))
+        using (FileStream stream = File.Open(path, FileMode.OpenOrCreate))
         {
             stream.Write(encodedTex, 0, encodedTex.Length);
         }
 
-        string loadPath = $"Assets/{animationRigObject.name} {clip.name}{extension}";
-        AssetDatabase.ImportAsset(loadPath);
+        AssetDatabase.ImportAsset(path);
         DestroyImmediate(result);
         #endregion
     }
@@ -252,6 +376,7 @@ public class MecanimToTexture : EditorWindow
         }
 
         uvLayer = (UVLayer)EditorGUILayout.EnumPopup("UV Layer", uvLayer);
+        uvMeshScale = EditorGUILayout.FloatField("Mesh Scale", uvMeshScale);
 
         List<Vector2> uvList = new List<Vector2>();
         uvMesh.GetUVs((int)uvLayer, uvList);
@@ -270,7 +395,24 @@ public class MecanimToTexture : EditorWindow
 
     private void ApplyUVToLayer()
     {
+        string path = EditorUtility.SaveFilePanelInProject("Save UV Mesh", uvMesh.name + " UV", "asset", "Please save your UV mesh");
+        if (path.Length == 0)
+        {
+            return;
+        }
+
         Mesh mesh = Instantiate(uvMesh);
+        if (uvMeshScale != 1)
+        {
+            Vector3[] vertices = mesh.vertices;
+            for (int i = 0; i < mesh.vertices.Length; i++)
+            {
+                vertices[i] *= uvMeshScale;
+            }
+            mesh.SetVertices(vertices);
+            mesh.RecalculateBounds();
+        }
+
         Vector2[] resultUV = new Vector2[mesh.vertexCount];
         for (int i = 0; i < resultUV.Length; i++)
         {
@@ -278,7 +420,7 @@ public class MecanimToTexture : EditorWindow
         }
 
         mesh.SetUVs((int)uvLayer, resultUV);
-        AssetDatabase.CreateAsset(mesh, $"Assets/{uvMesh.name} Baked.asset");
+        AssetDatabase.CreateAsset(mesh, path);
     }
 
     public enum UVLayer
