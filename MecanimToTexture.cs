@@ -147,6 +147,7 @@ public class MecanimToTexture : EditorWindow
         }
 
         EditorGUILayout.Space(EditorGUIUtility.singleLineHeight);
+        EditorGUILayout.LabelField($"Animations: {(bakeAll ? animationClips.Length : 1)}");
         EditorGUILayout.LabelField($"Frames to bake: {totalFrames}");
         EditorGUILayout.LabelField($"Pixels to fill: {vertexCount * totalFrames}");
         EditorGUILayout.LabelField($"Result texture size: {textureSize}x{textureSize}" + (bakeAll ? $"x{animationClips.Length}" : ""));
