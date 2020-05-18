@@ -1,51 +1,54 @@
 #include "HLSLSupport.cginc"
 
-void AnimationTexture_float(float TimeOffset, float4 VertexIDUV, float ColorMode, float FramesPerSecond, float AnimationFrames, Texture2D TexIn, float2 TexSize, float Scaler, float VertexCount, SamplerState TexSampler, out float3 PosOut)
+int2 GetTextureSize(Texture2D texIn)
 {
-    float time = _Time.y + TimeOffset;
-    int frameCount = floor(time * FramesPerSecond);
-    frameCount = fmod(frameCount, AnimationFrames);
-    int pixelOffset = frameCount * VertexCount;
+    int x;
+    int y;
+    texIn.GetDimensions(x, y);
+    return int2(x, y);
+}
 
-    float2 uvPos = float2(0.5, 0.5);
-    uvPos.x += floor((VertexIDUV.x + pixelOffset) / TexSize.x);
-    uvPos.y += fmod(VertexIDUV.x + pixelOffset, TexSize.y);
-    uvPos /= TexSize;
+int3 GetSamplePosition(Texture2D texIn, uint pixel)
+{
+    int2 size = GetTextureSize(texIn);
+    uint sizeX = (uint)size.x;
 
-    float3 positions = (float3)TexIn.SampleLevel(TexSampler, uvPos, 0);
+    return int3
+    (
+        pixel % sizeX,
+        (int)((float)pixel / size.x),
+        0
+    );
+}
 
-    //ColorMode 0 is LDR in Linear colorspace
-    //ColorMode 1 is HDR in Linear colorspace
-    if (ColorMode == 0) {
-        positions = pow(positions, 0.454545);
-    }
+void AnimationTexture_float(int FrameIndex, float2 VertexIDUV, int TotalFrameCount, Texture2D TexIn, float Scaler, int VertexCount, out float3 PosOut)
+{
+    uint frameIndex = (uint)FrameIndex;
+    uint totalFrameCount = (uint)TotalFrameCount;
+    frameIndex = frameIndex % totalFrameCount;
+    int stride = frameIndex * VertexCount;
+    uint pixel = (int)VertexIDUV.x + stride;
+
+    int3 samplePosition = GetSamplePosition(TexIn, pixel);
+    float3 positions = (float3)TexIn.Load(samplePosition);
 
     positions -= float3(0.5, 0.5, 0.5);
     positions /= Scaler;
     PosOut = positions;
 }
 
-void AnimationTexture_half(float TimeOffset, float4 VertexIDUV, float ColorMode, float FramesPerSecond, float AnimationFrames, Texture2D TexIn, float2 TexSize, float Scaler, float VertexCount, SamplerState TexSampler, out float3 PosOut)
+void AnimationTexture_half(int FrameIndex, half2 VertexIDUV, int TotalFrameCount, Texture2D TexIn, half Scaler, int VertexCount, out half3 PosOut)
 {
-    float time = _Time.y + TimeOffset;
-    int frameCount = floor(time * FramesPerSecond);
-    frameCount = fmod(frameCount, AnimationFrames);
-    int pixelOffset = frameCount * VertexCount;
+    uint frameIndex = (uint)FrameIndex;
+    uint totalFrameCount = (uint)TotalFrameCount;
+    frameIndex = frameIndex % totalFrameCount;
+    int stride = frameIndex * VertexCount;
+    uint pixel = (int)VertexIDUV.x + stride;
 
-    float2 uvPos = float2(0.5, 0.5);
-    uvPos.x += floor((VertexIDUV.x + pixelOffset) / TexSize.x);
-    uvPos.y += fmod(VertexIDUV.x + pixelOffset, TexSize.y);
-    uvPos /= TexSize;
+    int3 samplePosition = GetSamplePosition(TexIn, pixel);
+    half3 positions = (half3)TexIn.Load(samplePosition);
 
-    float3 positions = (float3)TexIn.SampleLevel(TexSampler, uvPos, 0);
-
-    //ColorMode 0 is LDR in Linear colorspace
-    //ColorMode 1 is HDR in Linear colorspace
-    if (ColorMode == 0) {
-        positions = pow(positions, 0.454545);
-    }
-
-    positions -= float3(0.5, 0.5, 0.5);
+    positions -= half3(0.5, 0.5, 0.5);
     positions /= Scaler;
     PosOut = positions;
 }
@@ -150,4 +153,18 @@ void AnimationTexturev2_half(Texture2DArray textures, float3 vertexPositions, fl
     positions -= float3(0.5, 0.5, 0.5);
     positions /= scaler;
     positionOut = positions;
+}
+
+void RemapUV_float(float time, float4 vertexIdUv, int vertexCount, int framesPerSecond, int textureSize, int frames, out float4 uvOut) {
+    int frameCount = floor(time * framesPerSecond);
+
+    int thisFrameCount = fmod(frameCount, frames);
+    int pixelOffset = thisFrameCount * vertexCount;
+    float4 uv = float4(0.5, 0.5, 0, 0);
+    uv.x += floor((vertexIdUv.x + pixelOffset) / textureSize);
+    uv.y += fmod(vertexIdUv.x + pixelOffset, textureSize);
+    uv.x /= textureSize;
+    uv.y /= textureSize;
+
+    uvOut = uv;
 }
