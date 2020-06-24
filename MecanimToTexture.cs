@@ -12,7 +12,8 @@ public class MecanimToTexture : EditorWindow
     private readonly string[] TabTitles = new string[] {
         "Animation Baker",
         "Mesh Baker",
-        "UV Mapper"
+        "UV Mapper",
+        "Texture Transformer"
     };
     private int currentTab;
     private Vector2 scrollPosition = Vector2.zero;
@@ -22,10 +23,6 @@ public class MecanimToTexture : EditorWindow
     private BakeMode bakeMode = BakeMode.AllIndividual;
     private int framesPerSecondCapture = 30;
     private int clipToBakeIndex = 0;
-    private bool bakeRotation = true;
-    private float animationTextureScaler = 1;
-    private int minFrame = 0;
-    private int maxFrame = 200;
     private ColorMode animationTextureColorMode = ColorMode.HDR;
     #endregion
 
@@ -41,9 +38,17 @@ public class MecanimToTexture : EditorWindow
     private float uvMeshScale = 1;
     #endregion
 
+    #region Texture Transformer Props
+    private Texture2D transformTexture = null;
+    private Vector3 transformTranslation = Vector3.zero;
+    private Vector3 transformRotation = Vector3.zero;
+    private Vector3 transformScale = Vector3.zero;
+    #endregion
+
     private List<string> animationTextureErrors = new List<string>();
     private List<string> meshTextureErrors = new List<string>();
     private List<string> uvErrors = new List<string>();
+    private List<string> textureTransformerErrors = new List<string>();
 
     [MenuItem("Window/ifelse/Mecanim2Texture")]
     private static void Init()
@@ -69,6 +74,9 @@ public class MecanimToTexture : EditorWindow
             case 2:
                 UVMapEditor();
                 break;
+            case 3:
+                TextureTransformerEditor();
+                break;
         }
         EditorGUILayout.EndScrollView();
 
@@ -82,6 +90,9 @@ public class MecanimToTexture : EditorWindow
                 break;
             case 2:
                 ErrorView(uvErrors);
+                break;
+            case 3:
+                ErrorView(textureTransformerErrors);
                 break;
         }
     }
@@ -122,8 +133,6 @@ public class MecanimToTexture : EditorWindow
         animationTextureColorMode = (ColorMode)EditorGUILayout.EnumPopup("Color Mode", animationTextureColorMode);
         bakeMode = (BakeMode)EditorGUILayout.EnumPopup(new GUIContent("Bake Mode", "Bake mode for faster iteration"), bakeMode);
         framesPerSecondCapture = EditorGUILayout.IntSlider(new GUIContent("FPS Capture", "How many frames per second the clip will be captured at."), framesPerSecondCapture, 1, 120);
-        bakeRotation = EditorGUILayout.Toggle(new GUIContent("Bake Rotation", "Apply the game object's rotation to the baked texture"), bakeRotation);
-        animationTextureScaler = EditorGUILayout.FloatField(new GUIContent("Bake Scale", "Scale the mesh before baking to reduce the chance of baked pixels being out of range."), animationTextureScaler);
 
         int vertexCount = animationRigObject.GetComponentInChildren<SkinnedMeshRenderer>().sharedMesh.vertexCount;
         float totalTime = 0;
@@ -144,10 +153,7 @@ public class MecanimToTexture : EditorWindow
 
                 totalTime = clipToBake.length;
 
-                minFrame = EditorGUILayout.IntSlider(new GUIContent("Min Capture Frame", "The frame to start capturing at."), minFrame, 0, maxFrame);
-                maxFrame = EditorGUILayout.IntSlider(new GUIContent("Max Capture Frame", "The frame to end capturing at."), maxFrame, minFrame, (int)(totalTime * framesPerSecondCapture));
-
-                totalFrames = maxFrame - minFrame;
+                totalFrames = (int)(totalTime * framesPerSecondCapture);
                 int pixelCountSingle = totalFrames * vertexCount;
                 squareFrames = Mathf.FloorToInt(Mathf.Sqrt(pixelCountSingle));
                 int potSingle = Mathf.NextPowerOfTwo(squareFrames);
@@ -203,26 +209,24 @@ public class MecanimToTexture : EditorWindow
         }
         EditorGUILayout.LabelField($"Estimated bake time: {totalTime / (60 / framesPerSecondCapture)} seconds");
 
-        Quaternion rotation = bakeRotation ? Quaternion.Inverse(animationRigObject.transform.GetChild(0).localRotation) : Quaternion.identity;
-
         switch (bakeMode)
         {
             case BakeMode.Single:
                 if (GUILayout.Button("Bake Animation (Single)"))
                 {
-                    EditorCoroutineUtility.StartCoroutine(CreateAnimationTexture(textureSize, vertexCount, totalFrames, framesPerSecondCapture, rotation, clipToBake), this);
+                    EditorCoroutineUtility.StartCoroutine(CreateAnimationTexture(textureSize, vertexCount, totalFrames, framesPerSecondCapture, clipToBake), this);
                 }
                 break;
             case BakeMode.AllIndividual:
                 if (GUILayout.Button("Bake Animations (Individual)"))
                 {
-                    EditorCoroutineUtility.StartCoroutine(CreateAnimationTextureIndividual(textureSizes, vertexCount, framesPerSecondCapture, rotation, animationClips), this);
+                    EditorCoroutineUtility.StartCoroutine(CreateAnimationTextureIndividual(textureSizes, vertexCount, framesPerSecondCapture, animationClips), this);
                 }
                 break;
             case BakeMode.AllTexture2DArray:
                 if (GUILayout.Button("Bake Animations (Texture2DArray)"))
                 {
-                    EditorCoroutineUtility.StartCoroutine(CreateAnimationTextureArray(highestPOT, vertexCount, framesPerSecondCapture, rotation, animationClips), this);
+                    EditorCoroutineUtility.StartCoroutine(CreateAnimationTextureArray(highestPOT, vertexCount, framesPerSecondCapture, animationClips), this);
                 }
                 break;
         }
@@ -238,7 +242,7 @@ public class MecanimToTexture : EditorWindow
         return result;
     }
 
-    private IEnumerator CreateAnimationTextureArray(int size, int vertexCount, int fps, Quaternion rotation, AnimationClip[] clips)
+    private IEnumerator CreateAnimationTextureArray(int size, int vertexCount, int fps, AnimationClip[] clips)
     {
         string path = EditorUtility.SaveFilePanelInProject("Save Baked Animation", animationRigObject.name, "asset", "Please save your baked animation");
         if (path.Length == 0)
@@ -284,8 +288,8 @@ public class MecanimToTexture : EditorWindow
                 for (int j = 0; j < vertexCount; j++)
                 {
                     Color pixel = Color.clear;
-                    Vector3 position = rotation * meshFrame.vertices[j];
-                    position = position * animationTextureScaler + Vector3.one * 0.5f;
+                    Vector3 position = meshFrame.vertices[j];
+                    position = position + Vector3.one * 0.5f;
                     pixel.r = position.x;
                     pixel.g = position.y;
                     pixel.b = position.z;
@@ -327,7 +331,7 @@ public class MecanimToTexture : EditorWindow
         Debug.Log("Finished");
     }
 
-    private IEnumerator CreateAnimationTextureIndividual(Vector2Int[] sizes, int vertexCount, int fps, Quaternion rotation, AnimationClip[] clips)
+    private IEnumerator CreateAnimationTextureIndividual(Vector2Int[] sizes, int vertexCount, int fps, AnimationClip[] clips)
     {
         string extension = animationTextureColorMode == ColorMode.HDR ? "exr" : "png";
         string path = EditorUtility.SaveFilePanelInProject("Save Baked Animation Array", animationRigObject.name, extension, "Please save your baked animations");
@@ -374,8 +378,8 @@ public class MecanimToTexture : EditorWindow
                 for (int j = 0; j < vertexCount; j++)
                 {
                     Color pixel = Color.clear;
-                    Vector3 position = rotation * meshFrame.vertices[j];
-                    position = position * animationTextureScaler + Vector3.one * 0.5f;
+                    Vector3 position = meshFrame.vertices[j];
+                    position = position + Vector3.one * 0.5f;
                     pixel.r = position.x;
                     pixel.g = position.y;
                     pixel.b = position.z;
@@ -434,7 +438,7 @@ public class MecanimToTexture : EditorWindow
         Debug.Log("Finished");
     }
 
-    private IEnumerator CreateAnimationTexture(Vector2Int size, int vertexCount, int frames, int fps, Quaternion rotation, AnimationClip clip)
+    private IEnumerator CreateAnimationTexture(Vector2Int size, int vertexCount, int frames, int fps, AnimationClip clip)
     {
         string extension = animationTextureColorMode == ColorMode.HDR ? "exr" : "png";
         string path = EditorUtility.SaveFilePanelInProject("Save Baked Animation Array", animationRigObject.name, animationTextureColorMode == ColorMode.HDR ? "exr" : "png", "Please save your baked animations");
@@ -467,45 +471,41 @@ public class MecanimToTexture : EditorWindow
         int x = 0;
         for (int i = 0; i < frames; i++)
         {
-            if (i >= minFrame && i < maxFrame)
+            Mesh meshFrame = new Mesh();
+            skinnedMesh.BakeMesh(meshFrame);
+            meshFrame.RecalculateBounds();
+
+            //red = x
+            //green = y
+            //blue = z
+            for (int j = 0; j < vertexCount; j++)
             {
-                Mesh meshFrame = new Mesh();
-                skinnedMesh.BakeMesh(meshFrame);
-                meshFrame.RecalculateBounds();
+                Color pixel = Color.clear;
+                Vector3 position = meshFrame.vertices[j];
+                position = position + Vector3.one * 0.5f;
+                pixel.r = position.x;
+                pixel.g = position.y;
+                pixel.b = position.z;
+                pixel.a = 1;
 
-                //red = x
-                //green = y
-                //blue = z
-                for (int j = 0; j < vertexCount; j++)
+                SetError(Errors.PixelOutOfRange,
+                    animationTextureErrors,
+                    position.x > 1 || position.x < 0
+                 || position.y > 1 || position.y < 0
+                 || position.z > 1 || position.z < 0
+                );
+
+                result.SetPixel(x, y, pixel);
+
+                x++;
+                if (x == size.x)
                 {
-                    Color pixel = Color.clear;
-                    Vector3 position = rotation * meshFrame.vertices[j];
-                    position = position * animationTextureScaler + Vector3.one * 0.5f;
-                    pixel.r = position.x;
-                    pixel.g = position.y;
-                    pixel.b = position.z;
-                    pixel.a = 1;
-
-                    SetError(Errors.PixelOutOfRange,
-                        animationTextureErrors,
-                        position.x > 1 || position.x < 0
-                     || position.y > 1 || position.y < 0
-                     || position.z > 1 || position.z < 0
-                    );
-
-                    result.SetPixel(x, y, pixel);
-
                     y++;
-                    if (y == size.y)
-                    {
-                        x++;
-                        y = 0;
-                    }
+                    x = 0;
                 }
-
-                DestroyImmediate(meshFrame);
             }
 
+            DestroyImmediate(meshFrame);
             animator.Update(animationDeltaTime);
 
             yield return null;
@@ -597,7 +597,7 @@ public class MecanimToTexture : EditorWindow
         for (int j = 0; j < vertexCount; j++)
         {
             Color pixel = Color.clear;
-            Vector3 position = mesh.vertices[j] * animationTextureScaler + Vector3.one * 0.5f;
+            Vector3 position = mesh.vertices[j] + Vector3.one * 0.5f;
             pixel.r = position.x * scaler;
             pixel.g = position.y * scaler;
             pixel.b = position.z * scaler;
@@ -648,10 +648,7 @@ public class MecanimToTexture : EditorWindow
     {
         uvMesh = (Mesh)EditorGUILayout.ObjectField("Mesh", uvMesh, typeof(Mesh), true);
 
-        if (SetError(Errors.MissingUVMesh, uvErrors, uvMesh == null))
-        {
-            return;
-        }
+        if (SetError(Errors.MissingUVMesh, uvErrors, uvMesh == null)) { return; }
 
         uvLayer = (UVLayer)EditorGUILayout.EnumPopup("UV Layer", uvLayer);
         uvMeshScale = EditorGUILayout.FloatField("Mesh Scale", uvMeshScale);
@@ -714,6 +711,78 @@ public class MecanimToTexture : EditorWindow
     }
     #endregion
 
+    #region Texture Transformer
+    private void TextureTransformerEditor()
+    {
+        transformTexture = (Texture2D)EditorGUILayout.ObjectField("Texture", transformTexture, typeof(Texture2D), false);
+
+        if (SetError(Errors.MissingTexture, textureTransformerErrors, transformTexture == null)) { return; }
+
+        transformTranslation = EditorGUILayout.Vector3Field("Translation", transformTranslation);
+        transformRotation = EditorGUILayout.Vector3Field("Rotation", transformRotation);
+        transformScale = EditorGUILayout.Vector3Field("Scale", transformScale);
+
+        EditorGUILayout.Space(EditorGUIUtility.singleLineHeight);
+        if (GUILayout.Button("Transform Texture"))
+        {
+            TransformTexture();
+        }
+    }
+
+    private void TransformTexture()
+    {
+        string[] extensionSplit = AssetDatabase.GetAssetPath(transformTexture).Split('.');
+        string extension = extensionSplit[extensionSplit.Length - 1];
+        string path = EditorUtility.SaveFilePanelInProject("Save Transformed Texture", transformTexture.name, extension, "Please save your transformed texture");
+        if (path.Length == 0) { return; }
+
+        Texture2D result = new Texture2D(transformTexture.width, transformTexture.height, extension == "png" ? DefaultFormat.LDR : DefaultFormat.HDR, TextureCreationFlags.None);
+
+        Quaternion rotationOffset = Quaternion.Euler(transformRotation);
+        Vector3 scaler = transformScale + Vector3.one;
+
+        for (int i = 0; i < transformTexture.width; i++)
+        {
+            for (int j = 0; j < transformTexture.height; j++)
+            {
+                Color pixel = transformTexture.GetPixel(i, j);
+                Vector3 p = new Vector3(pixel.r, pixel.g, pixel.b);
+
+                p += transformTranslation;
+                p = rotationOffset * p;
+                p = new Vector3(p.x * scaler.x, p.y * scaler.y, p.z * scaler.z);
+
+                pixel.r = p.x;
+                pixel.g = p.y;
+                pixel.b = p.z;
+                result.SetPixel(i, j, pixel);
+            }
+        }
+
+        #region Export
+        byte[] encodedTex;
+        if (animationTextureColorMode == ColorMode.HDR)
+        {
+            encodedTex = result.EncodeToEXR();
+        }
+        else
+        {
+            encodedTex = result.EncodeToPNG();
+        }
+
+        using (FileStream stream = File.Open(path, FileMode.OpenOrCreate))
+        {
+            stream.Write(encodedTex, 0, encodedTex.Length);
+        }
+
+        AssetDatabase.ImportAsset(path);
+        DestroyImmediate(result);
+        #endregion
+
+        Debug.Log("Finished");
+    }
+    #endregion
+
     #region Error Utility
     private bool SetError(string error, List<string> errorSet, bool condition)
     {
@@ -748,10 +817,12 @@ public class MecanimToTexture : EditorWindow
         public const string MissingRuntimeAnimatorController = ErrorPrefix + "Could not find a Runtime Animator Controller in the Animator's properties.";
         public const string MissingUVMesh = ErrorPrefix + "A mesh is not assigned for UV application.  Please assign one.";
         public const string MissingMesh = ErrorPrefix + "A mesh is not assigned for baking.  Please assign one.";
+        public const string MissingTexture = WarningPrefix + "A texture is not assigned for transforming.  Please assign one.";
 
         public const string NoAnimationClips = WarningPrefix + "There are no animation clips on this animator.  You can't bake nonexistant clips.";
         public const string UVAlreadyExists = WarningPrefix + "This mesh already has assigned UVs on this layer.  Applying will overwrite them.";
         public const string PixelOutOfRange = WarningPrefix + "A pixel's value was out of range (less than 0 or greater than 1).  The texture will save with the clamped pixel if set to LDR.";
+
     }
     #endregion
 }
