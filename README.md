@@ -15,9 +15,11 @@ Bake skinned mesh animations to 2D textures!
 - Set `Bake All` if you want to bake all animations into a Texture2DArray.  Jump to Bake All if you enable this.
 - Set the `FPS Capture` based on how you exported the animation from your tool of choice.  30 or 60 is recommended for animation export
 - Select the `Clip to Bake`
+- Set the `Bake Scale` to how large you want your baked animation to be, compared to the original size
+- Set `Min Capture Frame` and `Max Capture Frame` to determine the range of frames to be baked into the texture
 - Review details
     - `Animations`: How many animations will be baked.  This is always 1 unless you bake all animations
-    - Frames to bake: How many frames will be baked, based on `FPS Capture` and duration of `Clip to Bake`
+    - Frames to bake: How many frames will be baked, based on `FPS Capture`, `Min Capture Frame`, `Max Capture Frame`, and the duration of `Clip to Bake`
     - Pixels to fill: How many pixels in the final texture will be filled, based on `Frames to bake` and the mesh's vertex count
     - Result texture size: The minimum power of 2 size that can fit all of the `Pixels to fill`.
     - Estimated bake time: How long the bake is estimated to take
@@ -29,32 +31,44 @@ Bake skinned mesh animations to 2D textures!
 - Review details
     - `Result texture size` now has a 3d dimensions, relating to how many elements the Texture2DArray will have.  No matter how small an individual texture can be normally, the result will be the maximum size required.
 
-### Mesh Baker
-- Select the `Mesh` to bake into a texture.
-- Click the button to bake the mesh's vertices into a texture without any animation.
-
 ### UV Mapper
 - Select the `Mesh` to copy with the new UVs
 - Select which `UV Layer` you want to set.  If you've already got UVs on that layer, a warning will appear
 - Set a `Mesh Scale` to scale the mesh.  It's recommended to set this, even if you're scaling the mesh via shader.  Setting it properly will reduce the chance of render bounds being incorrect.
-- Click on the button to clone the mesh and apply the UVs on the selected layer.
+- Click on the button to clone the mesh and apply the UVs on the selected layer
 
-### Texture Transformer
-- Select the `Texture` to transform.  The texture must have `Read/Write` enabled in the import settings.  You can uncheck the option afterwards if desired.
-- Set the `Translation` (units), `Rotation` (euler angles), and `Scale` (units) values based on the offsets you want to give the texture.  If all values are 0, the texture will not change.
-- Click the button to save the transformed texture.
-
-### Shader Graph Custom Nodes (Mecanim2TexShaderGraphNodes.hlsl and BakedAnimation.shadersubgraph)
-- `int FrameIndex`: The frame you want to sample
-- `float2 VertexIDUV`: The UV channel you baked with the vertex ids with the UV Mapper
-- `int TotalFrameCount`: The frame count of the animation, so the shader knows when it has reached the end of the texture
-- `Texture2D TexIn`: The texture you want to sample
-- `int VertexCount`: The vertex count of the mesh
-- `out float3 PosOut`: The resulting vertex positions
+### Shader Graph Custom Nodes (Mecanim2TexShaderGraphNodes.hlsl)
+- `AnimationTexture`
+    - `float TimeOffset`: How many seconds the animation will be offset by
+    - `float4 VertexIDUV`: The UVs for whichever channel you selected when you baked the mesh in UV Mapper
+    - `float ColorMode`: LDR textures should use 0, HDR textures should use 1
+    - `float FramesPerSecond`: The FPS you baked the texture at
+    - `float AnimationFrames`: How many frames are in the baked animation
+    - `Texture2D TexIn`: The baked animation texture
+    - `float2 TexSize`: The texture's pixel dimensions
+    - `float Scaler`: The inverse of what you want to scale the mesh by.  0.5 doubles the mesh size, 2 halves it
+    - `float VertexCount`: The vertex count of the mesh
+    - `SamplerState TexSampler`: The sampler state used to sample the texture.  Filtering should be Point
+    - `out float3 PosOut`: The resulting vertex positions
+- `AnimationTexturev2`
+    - `Texture2DArray textures`: The Texture2DArray created when `Bake All` is enabled in Texture Creator
+    - `float3 vertexPositions`: The original vertex positions
+    - `float time`: The current time.  It's not calculated in the method, resulting in more customizability
+    - `float4 vertexIdUv`: The UVs for whichever channel you selected when you baked the mesh in UV Mapper
+    - `int vertexCount`: The vertex count of the mesh
+    - `int framesPerSecond`: The FPS you baked the texture at
+    - `float scaler`: The inverse of what you want to scale the mesh by.  0.5 doubles the mesh size, 2 halves it
+    - `int textureSize`: The pixel dimensions of the Texture2DArray.  Only one is necessary, since the x and y values of the texture are always the same.
+    - `float4 lerper`: With the provided configuration, this lerps between texture layers.  x, y, and z lerp texture layers, while w lerps from texture layers to the original mesh
+    - `int4 index`: The indices of the texture layers you want to sample
+    - `int4 frames`: The frame count of each texture layer animation you want to sample
+    - `SamplerState samplerState`: The sampler state the sample the textures with.  The Filter should be set to Point
+    - `out float3 positionOut`: The resulting vertex positions
 
 ## Notes
-- The pixels on resulting animation textures are ordered X left to right, and Y bottom to top
+- The pixels on resulting animation textures are ordered Y bottom to top, and X left to right
 - Custom Shader Graph nodes are supplied in this repository for your convenience.  They are meant for use with the mesh generated by the UV Mapper
+- AnimationTexturev2 can be modified to support however many animation layers you'd like to sample at once
 - Credits are appreciated, but not necessary
 
 ## Dependencies
