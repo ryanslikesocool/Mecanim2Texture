@@ -5,7 +5,10 @@ Bake skinned mesh animations to 2D textures!
 ### Texture Creator
 - Drag and drop the script into your project's Editor folder
 - In the top bar, select Window/ifelse/Mecanim2Texture
-- Drag and drop a gameobject or prefab into the `Animation Rig` field
+- Create a container object for each rig you want to export
+- Add rigged gameobjects as childs of the container
+- Drag and drop the container into the `Animation Rig` field
+- Select the animator you want to apply to the rigs in the container
 - The following components are required for the script to work properly.  If they are not preset, errors will appear at the bottom of the window and you will not be able to continue
     - Skinned Mesh Renderer
     - Animator (with an Animator Controller with at least one clip)
