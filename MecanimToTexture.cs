@@ -22,9 +22,10 @@ public class MecanimToTexture : EditorWindow
     private GameObject animationRigContainer;
     private RuntimeAnimatorController animatorController;
     private BakeMode bakeMode = BakeMode.AllIndividual;
-    private int framesPerSecondCapture = 30;
+    private int framesPerSecondCapture = 24;
     private int clipToBakeIndex = 0;
     private ColorMode animationTextureColorMode = ColorMode.HDR;
+    private bool powerOfTwoOptimization = false;
     private int sizeOptimizationIteration = 4;
     #endregion
 
@@ -37,13 +38,12 @@ public class MecanimToTexture : EditorWindow
     #region UV Map Props
     private Mesh uvMesh;
     private UVLayer uvLayer = UVLayer.UV1;
+    private bool combineUVs = false;
     private float uvMeshScale = 1;
     #endregion
 
     #region Texture Transformer Props
     private Texture2D transformTexture = null;
-    private int transformFrameCount = 0;
-    private int transformVertexCount = 0;
     private AnimationCurve transformTranslationX = new AnimationCurve();
     private AnimationCurve transformTranslationY = new AnimationCurve();
     private AnimationCurve transformTranslationZ = new AnimationCurve();
@@ -137,7 +137,11 @@ public class MecanimToTexture : EditorWindow
         animationTextureColorMode = (ColorMode)EditorGUILayout.EnumPopup("Color Mode", animationTextureColorMode);
         bakeMode = (BakeMode)EditorGUILayout.EnumPopup(new GUIContent("Bake Mode", "Bake mode for faster iteration"), bakeMode);
         framesPerSecondCapture = EditorGUILayout.IntSlider(new GUIContent("FPS Capture", "How many frames per second the clip will be captured at."), framesPerSecondCapture, 1, 120);
-        sizeOptimizationIteration = EditorGUILayout.IntSlider(new GUIContent("Size Optimization Iterations", "How many times the script try to optimize the texture size."), sizeOptimizationIteration, 0, 8);
+        powerOfTwoOptimization = EditorGUILayout.Toggle(new GUIContent("PoT Optimization", "Optimize textures for PoT compression"), powerOfTwoOptimization);
+        if (powerOfTwoOptimization)
+        {
+            sizeOptimizationIteration = EditorGUILayout.IntSlider(new GUIContent("Size Optimization Iterations", "How many times the script try to optimize the texture size."), sizeOptimizationIteration, 0, 8);
+        }
 
         SkinnedMeshRenderer[] meshRenderers = animationRigContainer.GetComponentsInChildren<SkinnedMeshRenderer>();
         Animator[] animators = animationRigContainer.GetComponentsInChildren<Animator>();
@@ -155,12 +159,11 @@ public class MecanimToTexture : EditorWindow
         }
 
         float totalTime = 0;
-        int totalFrames;
-        int squareFrames;
+        int totalFrames = 0;
+        int squareFrames = 0;
 
         AnimationClip clipToBake = null;
 
-        int highestPOT = 0;
         switch (bakeMode)
         {
             case BakeMode.Single:
@@ -169,45 +172,71 @@ public class MecanimToTexture : EditorWindow
 
                 totalTime = clipToBake.length;
 
-                totalFrames = (int)(totalTime * framesPerSecondCapture);
-                int pixelCountSingle = totalFrames * vertexCount[0];
-                squareFrames = Mathf.FloorToInt(Mathf.Sqrt(pixelCountSingle));
-                int potSingle = Mathf.NextPowerOfTwo(squareFrames);
-                Vector2Int optimizedSquareFramesSingle = new Vector2Int(potSingle, potSingle);
-                for (int k = 0; k < sizeOptimizationIteration; k++)
-                {
-                    if ((potSingle * optimizedSquareFramesSingle.x) / 2 > pixelCountSingle)
-                    {
-                        optimizedSquareFramesSingle.x /= 2;
-                    }
-                }
-                textureSize = optimizedSquareFramesSingle;
-                break;
-            default:
                 for (int i = 0; i < meshRenderers.Length; i++)
                 {
-                    for (int j = 0; j < animationClips.Length; j++)
+                    totalFrames = (int)(totalTime * framesPerSecondCapture);
+                    if (powerOfTwoOptimization)
                     {
-                        float clipTime = animationClips[j].length;
-                        float clipFrames = (int)(clipTime * framesPerSecondCapture);
-                        totalTime += clipTime;
-
-                        int pixelCount = (int)(clipFrames * vertexCount[i]);
+                        int pixelCount = (int)(totalTime * vertexCount[i]);
                         squareFrames = Mathf.FloorToInt(Mathf.Sqrt(pixelCount));
                         int pot = Mathf.NextPowerOfTwo(squareFrames);
                         Vector2Int optimizedSquareFrames = new Vector2Int(pot, pot);
-                        highestPOT = Mathf.Max(pot, highestPOT);
-                        for (int k = 0; k < sizeOptimizationIteration; k++)
-                        {
-                            if ((pot * optimizedSquareFrames.x) / 2 > pixelCount)
-                            {
-                                optimizedSquareFrames.x /= 2;
-                            }
-                        }
+                        optimizedSquareFrames = GetSmallestPOT(optimizedSquareFrames, pixelCount, sizeOptimizationIteration);
                         minTextureSize = Vector2Int.Min(optimizedSquareFrames, minTextureSize);
                         textureSize = Vector2Int.Max(optimizedSquareFrames, textureSize);
 
-                        textureSizes[i][j] = optimizedSquareFrames;
+                        textureSizes[i][0] = textureSize;
+                    }
+                    else
+                    {
+                        for (int j = 0; j < animationClips.Length; j++)
+                        {
+                            textureSizes[i][0] = new Vector2Int(vertexCount[i], totalFrames);
+
+                            minTextureSize = Vector2Int.Min(textureSizes[i][j], minTextureSize);
+                            textureSize = Vector2Int.Max(textureSizes[i][j], textureSize);
+                        }
+                    }
+                }
+                break;
+            case BakeMode.AllIndividual:
+                foreach (AnimationClip clip in animationClips)
+                {
+                    totalTime += clip.length;
+                }
+
+                for (int i = 0; i < meshRenderers.Length; i++)
+                {
+                    if (powerOfTwoOptimization)
+                    {
+                        for (int j = 0; j < animationClips.Length; j++)
+                        {
+                            float clipTime = animationClips[j].length;
+                            float clipFrames = (int)(clipTime * framesPerSecondCapture);
+
+                            int pixelCount = (int)(clipFrames * vertexCount[i]);
+                            squareFrames = Mathf.FloorToInt(Mathf.Sqrt(pixelCount));
+                            int pot = Mathf.NextPowerOfTwo(squareFrames);
+                            Vector2Int optimizedSquareFrames = new Vector2Int(pot, pot);
+                            optimizedSquareFrames = GetSmallestPOT(optimizedSquareFrames, pixelCount, sizeOptimizationIteration);
+                            minTextureSize = Vector2Int.Min(optimizedSquareFrames, minTextureSize);
+                            textureSize = Vector2Int.Max(optimizedSquareFrames, textureSize);
+
+                            textureSizes[i][j] = optimizedSquareFrames;
+                        }
+                    }
+                    else
+                    {
+                        for (int j = 0; j < animationClips.Length; j++)
+                        {
+                            float clipTime = animationClips[j].length;
+                            int clipFrames = (int)(clipTime * framesPerSecondCapture);
+
+                            textureSizes[i][j] = new Vector2Int(vertexCount[i], clipFrames);
+
+                            minTextureSize = Vector2Int.Min(textureSizes[i][j], minTextureSize);
+                            textureSize = Vector2Int.Max(textureSizes[i][j], textureSize);
+                        }
                     }
                 }
                 totalFrames = (int)(totalTime * framesPerSecondCapture);
@@ -225,9 +254,6 @@ public class MecanimToTexture : EditorWindow
             case BakeMode.AllIndividual:
                 EditorGUILayout.LabelField($"Result texture size: {minTextureSize} (min), {textureSize} (max)");
                 break;
-            case BakeMode.AllTexture2DArray:
-                EditorGUILayout.LabelField($"Result texture size: {textureSize}x{animationClips.Length}");
-                break;
         }
         EditorGUILayout.LabelField($"Estimated bake time: {totalTime / (60 / framesPerSecondCapture)} seconds");
 
@@ -238,7 +264,7 @@ public class MecanimToTexture : EditorWindow
                 {
                     for (int i = 0; i < meshRenderers.Length; i++)
                     {
-                        EditorCoroutineUtility.StartCoroutine(CreateAnimationTexture(textureSize, vertexCount[i], totalFrames, framesPerSecondCapture, clipToBake, animationRigContainer.transform.GetChild(i).gameObject), this);
+                        EditorCoroutineUtility.StartCoroutine(CreateSingleAnimationTextureForRig(textureSizes[i][0], vertexCount[i], totalFrames, framesPerSecondCapture, clipToBake, animationRigContainer.transform.GetChild(i).gameObject), this);
                     }
                 }
                 break;
@@ -247,20 +273,29 @@ public class MecanimToTexture : EditorWindow
                 {
                     for (int i = 0; i < meshRenderers.Length; i++)
                     {
-                        EditorCoroutineUtility.StartCoroutine(CreateAnimationTextureIndividual(textureSizes[i], vertexCount[i], framesPerSecondCapture, animationClips, animationRigContainer.transform.GetChild(i).gameObject), this);
-                    }
-                }
-                break;
-            case BakeMode.AllTexture2DArray:
-                if (GUILayout.Button("Bake Animations (Texture2DArray)"))
-                {
-                    for (int i = 0; i < meshRenderers.Length; i++)
-                    {
-                        EditorCoroutineUtility.StartCoroutine(CreateAnimationTextureArray(highestPOT, vertexCount[i], framesPerSecondCapture, animationClips), this);
+                        EditorCoroutineUtility.StartCoroutine(CreateAllAnimationTexturesForRig(textureSizes[i], vertexCount[i], framesPerSecondCapture, animationClips, animationRigContainer.transform.GetChild(i).gameObject), this);
                     }
                 }
                 break;
         }
+    }
+
+    private Vector2Int GetSmallestPOT(Vector2Int unoptimized, int pixelCount, int iterations)
+    {
+        for (int k = 0; k < iterations; k++)
+        {
+            if ((unoptimized.x * unoptimized.y) / 2 > pixelCount)
+            {
+                unoptimized.x /= 2;
+            }
+            if (((unoptimized.x / 2) * (unoptimized.y * 2)) > pixelCount)
+            {
+                unoptimized.x /= 2;
+                unoptimized.y *= 2;
+            }
+        }
+
+        return unoptimized;
     }
 
     private string[] GetAnimationClipNames(AnimationClip[] clips)
@@ -273,7 +308,7 @@ public class MecanimToTexture : EditorWindow
         return result;
     }
 
-    private IEnumerator CreateAnimationTextureIndividual(Vector2Int[] sizes, int vertexCount, int fps, AnimationClip[] clips, GameObject original)
+    private IEnumerator CreateAllAnimationTexturesForRig(Vector2Int[] sizes, int vertexCount, int fps, AnimationClip[] clips, GameObject original)
     {
         string extension = animationTextureColorMode == ColorMode.HDR ? "exr" : "png";
         string path = EditorUtility.SaveFilePanelInProject("Save Baked Animation Array", original.name, extension, "Please save your baked animations");
@@ -364,7 +399,7 @@ public class MecanimToTexture : EditorWindow
             }
 
             #region Export
-            string clipPath = $"{filePrefix}@{clips[clip].name} v{vertexCount} f{frames}  s{sizes[clip]}.{extension}";
+            string clipPath = $"{filePrefix}@{clips[clip].name} v{vertexCount} f{frames} s{sizes[clip]}.{extension}";
             byte[] encodedTex;
             if (animationTextureColorMode == ColorMode.HDR)
             {
@@ -386,10 +421,10 @@ public class MecanimToTexture : EditorWindow
         }
 
         DestroyImmediate(prefab);
-        Debug.Log("Finished");
+        Debug.Log($"Finished all clips for object {original.name}");
     }
 
-    private IEnumerator CreateAnimationTexture(Vector2Int size, int vertexCount, int frames, int fps, AnimationClip clip, GameObject original)
+    private IEnumerator CreateSingleAnimationTextureForRig(Vector2Int size, int vertexCount, int frames, int fps, AnimationClip clip, GameObject original)
     {
         string extension = animationTextureColorMode == ColorMode.HDR ? "exr" : "png";
         string path = EditorUtility.SaveFilePanelInProject("Save Baked Animation Array", original.name, animationTextureColorMode == ColorMode.HDR ? "exr" : "png", "Please save your baked animations");
@@ -465,7 +500,7 @@ public class MecanimToTexture : EditorWindow
         DestroyImmediate(prefab);
 
         #region Export
-        string clipPath = $"{filePrefix}@{clip.name} f{frames} s{size}.{extension}";
+        string clipPath = $"{filePrefix}@{clip.name} v{vertexCount} f{frames} s{size}.{extension}";
 
         byte[] encodedTex;
         if (animationTextureColorMode == ColorMode.HDR)
@@ -486,96 +521,7 @@ public class MecanimToTexture : EditorWindow
         DestroyImmediate(result);
         #endregion
 
-        Debug.Log("Finished");
-    }
-
-    private IEnumerator CreateAnimationTextureArray(int size, int vertexCount, int fps, AnimationClip[] clips)
-    {
-        string path = EditorUtility.SaveFilePanelInProject("Save Baked Animation", animationRigContainer.name, "asset", "Please save your baked animation");
-        if (path.Length == 0)
-        {
-            yield break;
-        }
-
-        GameObject prefab = Instantiate(animationRigContainer);
-        Animator animator = prefab.GetComponentInChildren<Animator>();
-        SkinnedMeshRenderer skinnedMesh = prefab.GetComponentInChildren<SkinnedMeshRenderer>();
-
-        Texture2DArray result = new Texture2DArray(size, size, clips.Length, TextureFormat.RGB9e5Float, false, true);
-        AssetDatabase.CreateAsset(result, path);
-
-        for (int clip = 0; clip < clips.Length; clip++)
-        {
-            Color[] clipColors = new Color[size * size];
-            for (int i = 0; i < clipColors.Length; i++)
-            {
-                clipColors[i] = Color.clear;
-            }
-
-            float clipTime = clips[clip].length;
-            int frames = (int)(clipTime * framesPerSecondCapture);
-
-            animator.Play(clips[clip].name, 0, 0);
-            yield return null;
-            animator.Update(0);
-
-            float animationDeltaTime = 1f / fps;
-
-            int y = 0;
-            int x = 0;
-            for (int i = 0; i < frames; i++)
-            {
-                Mesh meshFrame = new Mesh();
-                skinnedMesh.BakeMesh(meshFrame);
-                meshFrame.RecalculateBounds();
-
-                //red = x
-                //green = y
-                //blue = z
-                for (int j = 0; j < vertexCount; j++)
-                {
-                    Color pixel = Color.clear;
-                    Vector3 position = meshFrame.vertices[j];
-                    position = position + Vector3.one * 0.5f;
-                    pixel.r = position.x;
-                    pixel.g = position.y;
-                    pixel.b = position.z;
-                    pixel.a = 1;
-
-                    SetError(Errors.PixelOutOfRange,
-                        animationTextureErrors,
-                        position.x > 1 || position.x < 0
-                     || position.y > 1 || position.y < 0
-                     || position.z > 1 || position.z < 0
-                    );
-
-                    clipColors[x + y * size] = pixel;
-
-                    y++;
-                    if (y == size)
-                    {
-                        x++;
-                        y = 0;
-                    }
-                }
-
-                DestroyImmediate(meshFrame);
-
-                animator.Update(animationDeltaTime);
-
-                yield return null;
-            }
-            result.SetPixels(clipColors, clip);
-        }
-
-        result.Apply();
-
-        DestroyImmediate(prefab);
-
-        result.filterMode = FilterMode.Point;
-        AssetDatabase.ImportAsset(path);
-
-        Debug.Log("Finished");
+        Debug.Log($"Finished clip {clip.name} for object {original.name}");
     }
 
     public enum ColorMode
@@ -588,7 +534,6 @@ public class MecanimToTexture : EditorWindow
     {
         Single,
         [InspectorName("All (Individual)")] AllIndividual,
-        [InspectorName("All (Texture2DArray)")] AllTexture2DArray,
     }
     #endregion
 
@@ -699,6 +644,7 @@ public class MecanimToTexture : EditorWindow
         if (uvList.Count > 0)
         {
             GUILayout.Label(Errors.UVAlreadyExists);
+            combineUVs = EditorGUILayout.Toggle("Combine UVs", combineUVs);
         }
 
         EditorGUILayout.Space(EditorGUIUtility.singleLineHeight);
@@ -725,13 +671,35 @@ public class MecanimToTexture : EditorWindow
         mesh.SetVertices(vertices);
         mesh.SetIndices(uvMesh.GetIndices(0), MeshTopology.Triangles, 0);
         mesh.uv = uvMesh.uv;
+        mesh.uv2 = uvMesh.uv2;
+        mesh.uv3 = uvMesh.uv3;
+        mesh.uv4 = uvMesh.uv4;
+        mesh.uv5 = uvMesh.uv5;
+        mesh.uv6 = uvMesh.uv6;
+        mesh.uv7 = uvMesh.uv7;
+        mesh.uv8 = uvMesh.uv8;
         mesh.normals = uvMesh.normals;
         mesh.RecalculateBounds();
 
-        Vector2[] resultUV = new Vector2[mesh.vertexCount];
-        for (int i = 0; i < resultUV.Length; i++)
+        List<Vector2> resultUV = new List<Vector2>();
+        mesh.GetUVs((int)uvLayer, resultUV);
+        if (!combineUVs)
         {
-            resultUV[i].x = i;
+            for (int i = 0; i < resultUV.Count; i++)
+            {
+                Vector2 uv = resultUV[i];
+                uv.x = i;
+                resultUV[i] = uv;
+            }
+        }
+        else
+        {
+            for (int i = 0; i < resultUV.Count; i++)
+            {
+                Vector2 uv = resultUV[i];
+                uv.x += i;
+                resultUV[i] = uv;
+            }
         }
 
         mesh.SetUVs((int)uvLayer, resultUV);
@@ -757,11 +725,6 @@ public class MecanimToTexture : EditorWindow
         transformTexture = (Texture2D)EditorGUILayout.ObjectField("Texture", transformTexture, typeof(Texture2D), false);
 
         if (SetError(Errors.MissingTexture, textureTransformerErrors, transformTexture == null)) { return; }
-
-        EditorGUILayout.BeginHorizontal();
-        transformFrameCount = EditorGUILayout.IntField("Frame Count", transformFrameCount);
-        transformVertexCount = EditorGUILayout.IntField("Vertex Count", transformVertexCount);
-        EditorGUILayout.EndHorizontal();
 
         EditorGUILayout.BeginHorizontal();
         EditorGUILayout.LabelField("Translation");
@@ -822,17 +785,17 @@ public class MecanimToTexture : EditorWindow
         Texture2D result = new Texture2D(transformTexture.width, transformTexture.height, extension == "png" ? DefaultFormat.LDR : DefaultFormat.HDR, TextureCreationFlags.None);
 
         Color[] colors = transformTexture.GetPixels();
-        for (int f = 0; f < transformFrameCount; f++)
+        for (int f = 0; f < result.width; f++)
         {
-            float percent = (float)f / transformFrameCount;
+            float percent = (float)f / result.height;
 
             Vector3 translationOffset = new Vector3(transformTranslationX.Evaluate(percent), transformTranslationY.Evaluate(percent), transformTranslationZ.Evaluate(percent));
             Quaternion rotationOffset = Quaternion.Euler(transformRotationX.Evaluate(percent), transformRotationY.Evaluate(percent), transformRotationZ.Evaluate(percent));
             Vector3 scaler = new Vector3(transformScaleX.Evaluate(percent), transformScaleY.Evaluate(percent), transformScaleZ.Evaluate(percent)) + Vector3.one;
 
-            for (int i = 0; i < transformVertexCount; i++)
+            for (int i = 0; i < result.height; i++)
             {
-                int index = f * transformVertexCount + i;
+                int index = f * result.height + i;
                 Color pixel = colors[index];
                 Vector3 p = new Vector3(pixel.r, pixel.g, pixel.b);
 
