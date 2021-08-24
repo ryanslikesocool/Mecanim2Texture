@@ -64,8 +64,16 @@ namespace Mec2Tex
             mesh.normals = uvMesh.normals;
             mesh.RecalculateBounds();
 
-            List<Vector2> resultUV = new List<Vector2>();
+            List<Vector2> resultUV = new List<Vector2>(mesh.vertexCount);
             mesh.GetUVs((int)uvLayer, resultUV);
+            if (resultUV.Count == 0)
+            {
+                for (int i = 0; i < mesh.vertexCount; i++)
+                {
+                    resultUV.Add(Vector2.zero);
+                }
+            }
+
             if (!combineUVs)
             {
                 for (int i = 0; i < resultUV.Count; i++)
